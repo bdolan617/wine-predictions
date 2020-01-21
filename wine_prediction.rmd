@@ -1,0 +1,96 @@
+---
+title: "wine-ratings"
+author: "Brian Dolan"
+date: "1/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+theme_set(theme_light())
+library(tidyverse)
+library(janitor)
+
+old_world <- c("France", "Italy", "Spain", "Portugal",
+                                     "Greece", "Austria", "Hungary", "Germany",
+                                     "Turkey", "Georgia", "Armenia", "Moldova")
+
+# Wine Enthusiast Ratings from June 15th, 2017
+# Only wines with a review of 80 or greater are included
+data <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-05-28/winemag-data-130k-v2.csv") %>% 
+  select(-X1, -taster_twitter_handle) %>%
+  # only "recent" vintages
+  extract(title, "year", "(20\\d\\d)", convert = TRUE, remove = FALSE) %>%
+  mutate(year = ifelse(year < 1900, NA, year),
+         # perhaps controversial, country list from Wine Folly
+         world = ifelse(country %in% old_world, "old", "new"),
+         rating = case_when(
+           points <= 82 ~ "acceptable",
+           points > 82 & points <= 86 ~ "good",
+           points > 86 & points <= 89 ~ "very good",
+           points > 89 & points <= 93 ~ "excellenct", 
+           points > 93 & points <= 97 ~ "superb",
+           points > 97 ~ "classic"
+         )) %>%
+  replace_na(list(variety = "Missing", year = "Missing", taster_name = "Missing", country = "Missing")) %>%
+  filter(!is.na(price)) %>% 
+  clean_names()
+```
+
+
+```{r EDA}
+ggplot(data, aes(price, points)) +
+  geom_point(alpha = .1) +
+  geom_smooth() + 
+  # need to scale as distribution is right skewed
+  # one bottle was > 3000$ (wasn't scored 100!)
+  scale_x_log10()
+
+# old world wines have a smaller and very slightly higher point distribution than new world wines
+ggplot(data, aes(world, points)) +
+  geom_boxplot() +
+  coord_flip()
+
+```
+
+## Questions
+1. Detect rating by words in description
+2. Can I detect the type of wine by words in description
+3. Look for underrated wine varietal in terms of price ex. high rating low price
+
+```{r Question 1 - Detect Rating by Words in Description}
+library(tidytext)
+
+
+# Want to check to see which words are most frequently used among each of the six ratings
+bigram_text <-  data %>% 
+  mutate(id = row_number()) %>% 
+  unnest_tokens(word, description, token = "ngrams", n = 3) %>% 
+  # remove "stop words" like 'and', 'or' and 'what'
+  anti_join(stop_words, by = "word") %>% 
+  # add "custom" stop words to remove
+  filter(!word %in% c("wine", "drink")) %>% 
+  filter(str_detect(word, "[a-z]"))
+
+bigram_text <- bigram_text %>% 
+  separate(word, c("word1", "word2", "word3"), sep = " ") 
+
+bigram_text <- bigram_text %>% 
+  filter(!word1 %in% stop_words$word) %>% 
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word3 %in% stop_words$word)
+
+bigram_counts <- bigram_text %>% 
+  count(rating, word1, word2, word3, sort = TRUE)
+
+glimpdata_text <- data %>% 
+  mutate(id = row_number()) %>% 
+  unnest_tokens(word, description) %>% 
+  # remove "stop words" like 'and', 'or' and 'what'
+  anti_join(stop_words, by = "word") %>% 
+  # add "custom" stop words to remove
+  filter(!word %in% c("wine", "drink")) %>% 
+  filter(str_detect(word, "[a-z]"))
+
+```
+
