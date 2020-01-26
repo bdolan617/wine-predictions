@@ -83,14 +83,73 @@ bigram_text <- bigram_text %>%
 bigram_counts <- bigram_text %>% 
   count(rating, word1, word2, word3, sort = TRUE)
 
-glimpdata_text <- data %>% 
+bigrams_united <- unite(data = bigram_counts, trigram, word1, word2, word3, sep = " ")
+
+top_trigrams <- bigrams_united %>%
+  group_by(rating) %>% 
+  top_n(5, n) %>% 
+  ungroup() %>% 
+  arrange(rating, -n) 
+  
+top_trigrams %>% 
+  mutate(trigram = reorder(trigram, n)) %>% 
+ggplot(aes(trigram, n, fill = factor(rating))) + 
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ rating, scales = "free") + 
+  coord_flip()
+
+data_text <- data %>% 
   mutate(id = row_number()) %>% 
   unnest_tokens(word, description) %>% 
   # remove "stop words" like 'and', 'or' and 'what'
   anti_join(stop_words, by = "word") %>% 
   # add "custom" stop words to remove
-  filter(!word %in% c("wine", "drink")) %>% 
+  filter(!word %in% c("wine", "drink", "flavors")) %>% 
   filter(str_detect(word, "[a-z]"))
 
+word_counts <- data_text %>% 
+  count(rating, word, sort = TRUE) %>% 
+  ungroup()
+
+library(topicmodels)
+library(tm)
+ 
+# make into DocumentTermMatrix
+desc_dtm <- word_counts %>% 
+  cast_dtm(rating, word, n)
+
+# it looks like sparsity of this corpus is 63%. This is higher than most of the 
+# other uses of Topic Modeling I've seen. This can be attributed to the relatively "small" number
+# of words that can be used to describe wine. While wine reviews might appear to be verbose and use esoteric words like "flinty" and "whiffs", the reviews appear to be verbose through the use of many of the same esoteric words.
+desc_dtm
+
+# create LDA model
+LDA_mod <- LDA(desc_dtm, k = 6, control = list(seed = 1234))
+
+tidy_lda <- tidy(LDA_mod)
+
+top_terms <- tidy_lda %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta)
+
+top_terms %>% 
+  mutate(term = reorder(term, beta)) %>% 
+  group_by(topic, term) %>% 
+  arrange(desc(beta)) %>% 
+  ungroup() %>% 
+  mutate(term = factor(paste(term, topic, sep = "_"),
+                       levels = rev(paste(term, topic, sep = "_")))) %>% 
+  ggplot(aes(term, beta, fill = as.factor(topic))) +
+  geom_col(show.legend = FALSE) + 
+  coord_flip() + 
+  scale_x_discrete(labels = function(x) gsub("_.+$", "", x)) +
+  labs(title = "Top 10 descriptors in each LDA topic",
+       x = NULL,
+       y = expression(beta)) + 
+  facet_wrap(~ topic, ncol = 3, scales = "free")
 ```
+
+
 
